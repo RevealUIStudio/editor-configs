@@ -23,7 +23,7 @@ Usage: unlink.sh [OPTIONS]
 
 Options:
   --target DIR     Project directory to unlink from (required)
-  --editor NAME    Editor to unlink: cursor, zed, vscode, all (default: all)
+  --editor NAME    Editor to unlink: cursor, zed, vscode, claude, agents, all (default: all)
   --dry-run        Show what would be done without making changes
   -h, --help       Show this help
 EOF
@@ -51,6 +51,8 @@ declare -A EDITOR_DIRS=(
   [cursor]=".cursor"
   [zed]=".zed"
   [vscode]=".vscode"
+  [claude]=".claude"
+  [agents]=".agents"
 )
 
 REMOVED=0
@@ -92,7 +94,7 @@ $DRY_RUN && echo "(dry run)"
 echo ""
 
 if [[ "$EDITOR" == "all" ]]; then
-  for e in cursor zed vscode; do
+  for e in cursor zed vscode claude agents; do
     unlink_editor "$e"
   done
 else

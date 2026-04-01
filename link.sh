@@ -7,10 +7,10 @@
 #   ./link.sh --target ~/projects/RevealUI --editor zed         # zed only
 #   ./link.sh --list                                            # show available profiles
 #
-# Creates real directories (.zed/, .cursor/) in the target, then symlinks
-# individual config files from base/ and optionally a profile overlay.
+# Creates real directories (.zed/, .cursor/, .claude/, .agents/) in the target,
+# then symlinks individual config files from base/ and optionally a profile overlay.
 # Profile files override base files where filenames overlap.
-# Adds symlinked editor dirs to the target's .gitignore.
+# Adds symlinked dirs to the target's .gitignore.
 
 set -euo pipefail
 
@@ -27,7 +27,7 @@ Usage: link.sh [OPTIONS]
 Options:
   --target DIR     Project directory to link into (required)
   --profile NAME   Profile overlay (e.g., revealui, revealcoin)
-  --editor NAME    Editor to link: cursor, zed, vscode, all (default: all)
+  --editor NAME    Editor to link: cursor, zed, vscode, claude, agents, all (default: all)
   --dry-run        Show what would be done without making changes
   --list           List available profiles and exit
   -h, --help       Show this help
@@ -86,6 +86,8 @@ declare -A EDITOR_DIRS=(
   [cursor]=".cursor"
   [zed]=".zed"
   [vscode]=".vscode"
+  [claude]=".claude"
+  [agents]=".agents"
 )
 
 LINKED=0
@@ -219,7 +221,7 @@ $DRY_RUN && echo "(dry run)"
 echo ""
 
 if [[ "$EDITOR" == "all" ]]; then
-  for e in cursor zed vscode; do
+  for e in cursor zed vscode claude agents; do
     link_editor "$e"
   done
 else
@@ -230,7 +232,7 @@ echo ""
 
 # Gitignore entries
 if [[ "$EDITOR" == "all" ]]; then
-  for e in cursor zed vscode; do
+  for e in cursor zed vscode claude agents; do
     ensure_gitignored "${EDITOR_DIRS[$e]}/"
   done
 else
