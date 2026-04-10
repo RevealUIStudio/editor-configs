@@ -4,39 +4,32 @@ Multiple Claude Code instances may work on this repo simultaneously (e.g. termin
 
 ## Identity
 
-Agent identity is resolved automatically by `session-start.js` using a 6-tier detection cascade. The result is cached for the session in `/tmp/revealui-session-<ppid>.id`.
+Agent identity is resolved automatically by `session-start.js` using a 3-tier detection cascade. The result is cached for the session in `/tmp/revealui-session-<ppid>.id`.
 
 ### Identity Taxonomy
 
 | Identity | Detection Signal | Context |
 |----------|-----------------|---------|
-| `wsl-root` | `CLAUDE_AGENT_ROLE` env var (tmux `-e`) | tmux window 1 |
-| `revealui-terminal` | `CLAUDE_AGENT_ROLE` env var (tmux `-e`) | tmux window 2 |
+| `conductor` | `CLAUDE_AGENT_ROLE=conductor` | Primary orchestration agent |
 | `agent-extension` | `/proc` walk finds `zed` + no `CLAUDE_TERMINAL_CONTEXT` | Zed ACP inline (editor extension) |
 | `agent-extension-2`, `-3`... | same, second+ Zed window | Multiple editor extension instances |
 | `agent-edit` | `/proc` walk finds `zed` + `CLAUDE_TERMINAL_CONTEXT=zed-terminal` | Zed integrated terminal |
 | `agent-edit-2`, `-3`... | same, second+ instance | Multiple editor terminals |
 | `agent-system` | `WT_SESSION` present (any WT profile) | Any Windows Terminal / plain WSL terminal |
 | `agent-system-2`, `-3`... | same, second+ instance | Multiple system terminals |
+| (daemon-assigned) | `CLAUDE_AGENT_ROLE` set by SpawnerService | Native terminal PTY sessions |
 
-### Detection Cascade (7 tiers)
+### Detection Cascade (3 tiers)
 
-1. **Explicit env var** — `CLAUDE_AGENT_ROLE` set (tmux `-e`, shell export). Highest priority. Legacy values (`zed-extension`, `wsl`, `forge`, etc.) are aliased to canonical names.
-2. **Tmux window mapping** — If in tmux, reads `tmux_windows` from `agent-profiles.json` to map window index → identity. Auto-set by `.tmux.conf` hook on window creation/restore.
-3. **Session cache** — `/tmp/revealui-session-<ppid>.id` with timestamp. Reuses previous detection.
-4. **Zed detection** — Walk `/proc` parent tree for `zed` binary. Distinguish extension vs terminal via `CLAUDE_TERMINAL_CONTEXT`. Indexes via `nextIndexedId` against workboard active rows.
-5. **Windows Terminal** — `WT_SESSION` present + not in tmux + no Zed. All WT profiles map to `agent-system`. Indexes via `nextIndexedId`.
-6. **CWD inference** — `~/projects/` -> `wsl-root` (existing fallback).
-7. **Generic** — `agent-system-N` (replaces `terminal-N`).
+1. **Explicit env var** — `CLAUDE_AGENT_ROLE` set (daemon SpawnerService, shell export). Highest priority. Legacy values (`zed-extension`, `wsl`, `forge`, etc.) are aliased to canonical names. Daemon-spawned agents get identity assigned at spawn time.
+2. **Session cache** — `/tmp/revealui-session-<ppid>.id` with timestamp. Reuses previous detection within 8h.
+3. **Auto-detect** — Zed (proc walk), Windows Terminal (`WT_SESSION`), or generic `agent-system-N`. Indexed via `nextIndexedId` against workboard active rows.
 
 ### Configuration
 
 Profile mappings are in `~/.claude/agent-profiles.json`:
-- `tmux_windows`: maps tmux window index → identity (e.g., `"1": "wsl-root"`, `"2": "revealui-terminal"`)
 - `wt_profiles`: maps Windows Terminal profile GUID → identity
 - `default_zed_extension_name` / `default_zed_terminal_name`: override Zed auto-detection names
-
-`.tmux.conf` has an `after-new-window` hook that auto-sets `CLAUDE_AGENT_ROLE` for configured windows (including tmux-resurrect restores).
 
 On session start, the detected identity is logged. You can check it in the workboard Sessions table.
 
@@ -89,7 +82,7 @@ The receiving agent should:
 ## Workboard Format
 
 Keep the workboard compact. The Sessions table uses these columns:
-- `id`: your detected identity (e.g. `wsl-root`, `revealui-terminal`, `agent-extension`, `agent-edit`, `agent-system`)
+- `id`: your detected identity (e.g. `conductor`, `revealui-terminal`, `agent-extension`, `agent-edit`, `agent-system`)
 - `env`: environment description (e.g. `PowerShell`, `Zed/WSL`)
 - `started`: ISO timestamp of session start
 - `task`: short description of current work
