@@ -19,6 +19,8 @@ TARGET=""
 PROFILE=""
 EDITOR="all"
 DRY_RUN=false
+SKIP_EDITORS="${REVCON_SKIP_EDITORS:-}"
+PRIVATE_PROFILES_DIR="${REVCON_PRIVATE_PROFILES_DIR:-}"
 
 usage() {
   cat <<'EOF'
@@ -28,23 +30,40 @@ Options:
   --target DIR     Project directory to link into (required)
   --profile NAME   Profile overlay (e.g., revealui, revealcoin)
   --editor NAME    Editor to link: cursor, zed, vscode, claude, agents, all (default: all)
+  --skip NAME      Skip a specific editor (repeatable, comma-separated also works)
   --dry-run        Show what would be done without making changes
   --list           List available profiles and exit
   -h, --help       Show this help
+
+Environment variables:
+  REVCON_SKIP_EDITORS         Comma-separated editors to skip by default (e.g., "cursor")
+  REVCON_PRIVATE_PROFILES_DIR Additional directory searched for --profile <name>;
+                              private profiles take precedence over in-repo ones.
 
 Examples:
   ./link.sh --target ~/projects/RevealUI --profile revealui
   ./link.sh --target ~/projects/RevealCoin --editor zed
   ./link.sh --dry-run --target ~/projects/Foo --profile revealui
+  ./link.sh --target ~/projects/Foo --profile revealui --skip cursor
+  REVCON_SKIP_EDITORS=cursor ./link.sh --target ~/projects/Foo --profile revealui
 EOF
   exit 0
 }
 
-list_profiles() {
+print_profiles() {
   echo "Available profiles:"
   for dir in "$SCRIPT_DIR"/profiles/*/; do
     [ -d "$dir" ] && echo "  $(basename "$dir")"
   done
+  if [[ -n "$PRIVATE_PROFILES_DIR" && -d "$PRIVATE_PROFILES_DIR" ]]; then
+    for dir in "$PRIVATE_PROFILES_DIR"/*/; do
+      [ -d "$dir" ] && echo "  $(basename "$dir") (private)"
+    done
+  fi
+}
+
+list_profiles() {
+  print_profiles
   exit 0
 }
 
@@ -53,6 +72,7 @@ while [[ $# -gt 0 ]]; do
     --target)  TARGET="$2";  shift 2 ;;
     --profile) PROFILE="$2"; shift 2 ;;
     --editor)  EDITOR="$2";  shift 2 ;;
+    --skip)    SKIP_EDITORS="${SKIP_EDITORS:+$SKIP_EDITORS,}$2"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
     --list)    list_profiles ;;
     -h|--help) usage ;;
@@ -72,14 +92,24 @@ if [[ ! -d "$TARGET" ]]; then
   exit 1
 fi
 
-if [[ -n "$PROFILE" && ! -d "$SCRIPT_DIR/profiles/$PROFILE" ]]; then
-  echo "Error: profile not found: $PROFILE"
-  echo "Available profiles:"
-  for dir in "$SCRIPT_DIR"/profiles/*/; do
-    [ -d "$dir" ] && echo "  $(basename "$dir")"
-  done
-  exit 1
+PROFILE_DIR=""
+if [[ -n "$PROFILE" ]]; then
+  if [[ -n "$PRIVATE_PROFILES_DIR" && -d "$PRIVATE_PROFILES_DIR/$PROFILE" ]]; then
+    PROFILE_DIR="$PRIVATE_PROFILES_DIR/$PROFILE"
+  elif [[ -d "$SCRIPT_DIR/profiles/$PROFILE" ]]; then
+    PROFILE_DIR="$SCRIPT_DIR/profiles/$PROFILE"
+  else
+    echo "Error: profile not found: $PROFILE"
+    print_profiles
+    exit 1
+  fi
 fi
+
+should_skip_editor() {
+  local e="$1"
+  [[ -z "$SKIP_EDITORS" ]] && return 1
+  [[ ",$SKIP_EDITORS," == *",$e,"* ]]
+}
 
 # Map editor names to their dot-directories in the target
 declare -A EDITOR_DIRS=(
@@ -130,7 +160,7 @@ link_editor() {
   local editor="$1"
   local dot_dir="${EDITOR_DIRS[$editor]}"
   local base_src="$SCRIPT_DIR/base/$editor"
-  local profile_src="$SCRIPT_DIR/profiles/$PROFILE/$editor"
+  local profile_src="$PROFILE_DIR/$editor"
   local target_dir="$TARGET/$dot_dir"
 
   # Check if there are any files to link for this editor
@@ -222,10 +252,18 @@ echo ""
 
 if [[ "$EDITOR" == "all" ]]; then
   for e in cursor zed vscode claude agents; do
+    if should_skip_editor "$e"; then
+      echo "[$e] skipped (REVCON_SKIP_EDITORS / --skip)"
+      continue
+    fi
     link_editor "$e"
   done
 else
-  link_editor "$EDITOR"
+  if should_skip_editor "$EDITOR"; then
+    echo "[$EDITOR] skipped (REVCON_SKIP_EDITORS / --skip)"
+  else
+    link_editor "$EDITOR"
+  fi
 fi
 
 echo ""
@@ -233,10 +271,13 @@ echo ""
 # Gitignore entries
 if [[ "$EDITOR" == "all" ]]; then
   for e in cursor zed vscode claude agents; do
+    should_skip_editor "$e" && continue
     ensure_gitignored "${EDITOR_DIRS[$e]}/"
   done
 else
-  ensure_gitignored "${EDITOR_DIRS[$EDITOR]}/"
+  if ! should_skip_editor "$EDITOR"; then
+    ensure_gitignored "${EDITOR_DIRS[$EDITOR]}/"
+  fi
 fi
 
 echo ""

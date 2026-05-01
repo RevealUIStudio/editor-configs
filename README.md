@@ -78,6 +78,47 @@ mkdir -p profiles/revealcoin/cursor profiles/revealcoin/zed
 # Add project-specific configs (MCP servers, tasks, rules, etc.)
 ```
 
+## Personal Opt-Out
+
+The product ships configs for every supported editor. To skip editors you don't
+personally use, or to layer in a private profile that never enters this repo, two
+additive mechanisms are available — defaults are unchanged.
+
+### Skip editors
+
+```bash
+# Per-invocation
+./link.sh --target ~/projects/Foo --profile revealui --skip cursor
+
+# Default for your machine — set in ~/.bashrc / ~/.zshrc
+export REVCON_SKIP_EDITORS=cursor
+
+# Multiple skips
+export REVCON_SKIP_EDITORS=cursor,vscode
+```
+
+`--skip` and `REVCON_SKIP_EDITORS` apply to `link.sh`, `unlink.sh`, and `status.sh`.
+
+### Private profiles
+
+Point `REVCON_PRIVATE_PROFILES_DIR` at any directory outside this repo. Profile
+names there are searched first; in-repo profiles act as fallback.
+
+```bash
+export REVCON_PRIVATE_PROFILES_DIR=~/private/revcon-profiles
+
+mkdir -p ~/private/revcon-profiles/joshua/{zed,claude}
+# Drop your proprietary configs (rules, MCP servers, custom commands) under that tree.
+# Same layout as profiles/<name>/<editor>/.
+
+./link.sh --target ~/projects/Foo --profile joshua
+# Resolves to ~/private/revcon-profiles/joshua/, NOT this repo.
+```
+
+`./link.sh --list` shows both in-repo and private profiles, with `(private)`
+markers on the latter. `unlink.sh` knows to remove symlinks pointing into the
+private dir as well, and `status.sh` reports them as `private:<rel-path>` sources.
+
 ## Supported Editors
 
 | Editor | Dot-dir | Status |
