@@ -14,6 +14,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TARGET=""
 EDITOR="all"
 JSON=false
+SKIP_EDITORS="${REVCON_SKIP_EDITORS:-}"
+PRIVATE_PROFILES_DIR="${REVCON_PRIVATE_PROFILES_DIR:-}"
 
 usage() {
   cat <<'EOF'
@@ -22,8 +24,13 @@ Usage: status.sh [OPTIONS]
 Options:
   --target DIR     Check a specific project directory (default: scan ~/projects/*/)
   --editor NAME    Filter to editor: cursor, zed, vscode (default: all)
+  --skip NAME      Skip a specific editor (repeatable, comma-separated also works)
   --json           Machine-readable JSON output
   -h, --help       Show this help
+
+Environment variables:
+  REVCON_SKIP_EDITORS         Comma-separated editors to skip by default
+  REVCON_PRIVATE_PROFILES_DIR Treat symlinks pointing into this dir as linked too
 
 Examples:
   ./status.sh
@@ -38,11 +45,25 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --target) TARGET="$2";  shift 2 ;;
     --editor) EDITOR="$2";  shift 2 ;;
+    --skip)   SKIP_EDITORS="${SKIP_EDITORS:+$SKIP_EDITORS,}$2"; shift 2 ;;
     --json)   JSON=true;    shift ;;
     -h|--help) usage ;;
     *) echo "Unknown option: $1"; usage ;;
   esac
 done
+
+should_skip_editor() {
+  local e="$1"
+  [[ -z "$SKIP_EDITORS" ]] && return 1
+  [[ ",$SKIP_EDITORS," == *",$e,"* ]]
+}
+
+is_revcon_link() {
+  local dest="$1"
+  [[ "$dest" == "$SCRIPT_DIR"* ]] && return 0
+  [[ -n "$PRIVATE_PROFILES_DIR" && "$dest" == "$PRIVATE_PROFILES_DIR"* ]] && return 0
+  return 1
+}
 
 # Map editor names to their dot-directories in the target
 declare -A EDITOR_DIRS=(
@@ -54,10 +75,17 @@ declare -A EDITOR_DIRS=(
 # Build list of editors to check
 EDITORS=()
 if [[ "$EDITOR" == "all" ]]; then
-  EDITORS=(cursor zed vscode)
+  for e in cursor zed vscode; do
+    should_skip_editor "$e" && continue
+    EDITORS+=("$e")
+  done
 else
   if [[ -z "${EDITOR_DIRS[$EDITOR]+x}" ]]; then
     echo "Error: unknown editor: $EDITOR (expected cursor, zed, or vscode)"
+    exit 1
+  fi
+  if should_skip_editor "$EDITOR"; then
+    echo "Error: editor $EDITOR is in REVCON_SKIP_EDITORS / --skip"
     exit 1
   fi
   EDITORS=("$EDITOR")
@@ -82,7 +110,7 @@ discover_targets() {
         while IFS= read -r -d '' link; do
           local dest
           dest="$(readlink "$link" 2>/dev/null || true)"
-          if [[ "$dest" == "$SCRIPT_DIR"* ]]; then
+          if is_revcon_link "$dest"; then
             found=true
             break
           fi
@@ -122,10 +150,15 @@ fi
 # --- Helpers ---
 
 # Derive profile name from a symlink target path.
-# Returns the profile name if the source is under profiles/<name>/,
-# or empty string if from base/.
+# Returns the profile name if the source is under profiles/<name>/ (in-repo)
+# or under $PRIVATE_PROFILES_DIR/<name>/ (private). Empty string if from base/.
 derive_profile() {
   local src="$1"
+  if [[ -n "$PRIVATE_PROFILES_DIR" && "$src" == "$PRIVATE_PROFILES_DIR/"* ]]; then
+    local after="${src#"$PRIVATE_PROFILES_DIR/"}"
+    echo "${after%%/*} (private)"
+    return
+  fi
   local rel="${src#"$SCRIPT_DIR/"}"
   if [[ "$rel" == profiles/* ]]; then
     local after="${rel#profiles/}"
@@ -133,10 +166,15 @@ derive_profile() {
   fi
 }
 
-# Derive the display source path (relative to SCRIPT_DIR)
+# Derive the display source path. In-repo paths are shown relative to SCRIPT_DIR;
+# private-dir paths are tagged with a "private:" prefix.
 derive_source() {
   local src="$1"
-  echo "${src#"$SCRIPT_DIR/"}"
+  if [[ -n "$PRIVATE_PROFILES_DIR" && "$src" == "$PRIVATE_PROFILES_DIR/"* ]]; then
+    echo "private:${src#"$PRIVATE_PROFILES_DIR/"}"
+  else
+    echo "${src#"$SCRIPT_DIR/"}"
+  fi
 }
 
 # --- Collect data ---
@@ -188,8 +226,8 @@ process_target() {
     while IFS= read -r -d '' link; do
       local dest
       dest="$(readlink "$link" 2>/dev/null || true)"
-      # Only consider symlinks pointing into our repo
-      [[ "$dest" == "$SCRIPT_DIR"* ]] || continue
+      # Only consider symlinks pointing into our repo or the private profiles dir
+      is_revcon_link "$dest" || continue
       found_any=true
 
       local rel_name
